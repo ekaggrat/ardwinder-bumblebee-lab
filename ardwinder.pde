@@ -1,0 +1,1645 @@
+/* / ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+BUMBLEBEE LAB
+http://arduino.bumblebeelab.com/
+bumblebeelab@gmail.com
+CC BY-SA 3.0
+http://creativecommons.org/licenses/by-sa/3.0/
+
+Digital
+0 - RX (DEFAULT) ----------
+1 - TX (DEFAULT) ----------
+2 - DIR1 (EASYDRIVE)
+3 - STEP1 (EASYDRIVE)               
+4 - DB4 (LCD DISPLAY)          
+5 - DB5 (LCD DISPLAY)               
+6 - DB6 (LCD DISPLAY)               
+7 - DB7 (LCD DISPLAY)               
+8 - RS (LCD DISPLAY)               
+9 - EN (LCD DISPLAY) 
+10 - FREE --------------
+11 - STEP2 (EASYDRIVE)
+12 - DIR2 (EASYDRIVE)
+13 - FREE ---------------
+
+Analog
+0 - analogread(0) (LCD KEYPAD)
+1 - FREE ---------------
+2 - FREE ---------------
+3 - FREE ---------------
+4 - FREE ---------------
+5 - FREE ---------------
+ 
+Current Hardware:
+- Arduino Duemilanove 328p
+- LCD Keypad shield
+- LCD Display 20x4 JHD-204A / JHD629-204A / M12
+
+Ardwinder Previous rev:
+
+Version 18:
+ New features:
+ - Setup Gauge (AWG). Conversion is functional but is not affecting the program yet.
+
+Version 19 
+New Features:
+- Setup Gauge all functional with all the program
+
+Versioin 19b
+Working on:
+LCD 20x4
+
+ Version 19 
+ List of features:
+
+- LCD Menu for 
+ - Motor Speed
+ - Motor A callibration with increments of precision movement
+ - Motor B callibration with increments of precision movement
+ - Compensation calibration for motor B
+ - Setup Gauge (AWG). Status = Active 
+ - Setup Rows (RWS). Status = Active
+ - Setup Layers (LYR). Status = Active
+ - Show values for RWS, AWG & LYR
+- LCD Display
+  - Progression bar, Percentage of Rows/revolutions, layers count, global count, percentage of the whole program.
+- Two motors (Coil and Wire motors) A / B
+- Progressive bar 0.00% to 100% + graphic progressive bar (20% increment) < This feature slows down the loop by 20%
+- Set the speed of program (from 160 to 5000++) Less is faster. Maximum speed for this motor is 160.
+
+Experimental:
+  -Push button Emergency stop, proven to slow down the loop by another 50% TODO-FIX (disabled)
+  -Push button for speed change (commented out) signficantly slowing down the loop. TODO-FIX (disabled)
+  
+ Version 19_2c
+ Working on:
+- FULL Expanding the LCD menu from 16x2 to 20x4
+- Menu loops
+
+ 
+  
+Todo:
+- Reverse the AWG conversion 
+- Create a friendly E-Stop
+- Test removing PBAR vs E-Stop performance
+- Advanced LCD displaying
+- Remove previous experiment
+- retouch motor setup with confirmation before second setup
+- Speed change (?)
+
+
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+*/
+
+
+#include <LiquidCrystal.h>
+LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
+
+// SET PUSH BUTTONS VALUES /////////////////////
+int adc_key_val[5] ={30, 150, 360, 535, 760 };
+int NUM_KEYS = 5;
+int adc_key_in;
+int key=-1;
+int oldkey=-1;
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// EXPERIMENTAL ZONE HERE ////////////// EXPERIMENTAL ZONE HERE ////////////// EXPERIMENTAL ZONE HERE ///////////////////////////////////////////////
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// EXPERIMENTAL ZONE HERE ////////////// EXPERIMENTAL ZONE HERE ////////////// EXPERIMENTAL ZONE HERE ///////////////
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+#define rightKey 0
+#define upKey 1
+#define downKey 2
+#define leftKey 3
+#define selectKey 4
+// ///////////////////////////////////////////////
+
+
+// DEFINE STEPPER MOTORS /////////////////////////
+#define SENSOR_X_PIN 14 // Not used yet
+#define SENSOR_Y_PIN 15 // Not used yet
+#define DIR1_PIN 2 // Direction for X Axis
+#define STEP1_PIN 3 // Step for X Axis
+#define DIR2_PIN 12 // Direction for Y axis
+#define STEP2_PIN 11 // Step for Y axis
+// ///////////////////////////////////////////////
+
+
+// DEFINE MOTOR CHARACTERISTICS //////////////////////////////////////////////
+// #define DELAY 160 // Delay between pulses , was 160 / REPLACED FOR 'VOMVALUE'
+#define MOTOR 1600 // This is the amount of steps each 360 degrees of the motor
+
+#define PitchA 0.25 // This is the pitch of movement on one revolution (0.25" on this case) 
+
+float StepCoil = (PitchA / MOTOR); // This is the result of 0.25" / 1600 (the travel of one revolution of the wire motor on the screw)... is 0.00015625" for one step on this case.
+
+float Coil;
+
+// ///////////////////////////////////////////////////////////////////////////
+
+
+int Compensation = 125; // Change this for your compensation to avoid Compensation setup. Or set to 0 for setup.
+
+int MoveMotor;
+
+
+// DEFINE MENU ///////////////////////////////
+int General = -4;
+
+float WireDiameter; // Value on inchs for wire diameter
+
+int VOMvalue ; // Velocity of Motor (160 default)
+int STPvalue ; // Manual Steps value
+int AWGvalue ; // GAUGE Set Value
+int LYRvalue ; // Layers' Set Value
+int RWSvalue ; // Rows' Set Value
+
+int VOM[14] = {160, 200, 280, 320, 640, 1280, 2560, 5120, 1024, 2048, 4096, 8192, 16384, 32768}; // Manual velocity set (160 default)
+int STP[14] = {1,5,10,25,50,100,200,400,800,1200,1600,2000,3200,6400};// Manual Steps
+int AWG[41] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40};// Gauge value // http://en.wikipedia.org/wiki/American_wire_gauge#Table_of_AWG_wire_sizes
+int LYR[100] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100};// Layers
+int RWS[100] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100};// Rows
+
+
+int v = 0; // Motor velocity
+int s = 1; // Manual Steps value
+int w = 15; // Gauge value
+int l = 9; // Layer value
+int r = 9; // Rows value
+
+// ########### define AWG = Coil conversion (math here)
+
+////////////////////////////////
+// experimental ////////////////
+
+int Pause = 0;
+
+// experimental ////////////////
+////////////////////////////////
+
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// VOID SETUP //////////////////////////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void setup() {
+  
+  
+  
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// EXPERIMENTAL ZONE HERE ////////////// EXPERIMENTAL ZONE HERE ////////////// EXPERIMENTAL ZONE HERE ///////////////////////////////////////////////
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// pinMode(buttonPin, INPUT);   
+
+
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// EXPERIMENTAL ZONE HERE ////////////// EXPERIMENTAL ZONE HERE ////////////// EXPERIMENTAL ZONE HERE ///////////////
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////////////////////////  
+  
+  
+  
+  
+// SET MOTORS ////////////////////////////////////////
+pinMode(DIR1_PIN,OUTPUT); // Motor A
+pinMode(STEP1_PIN,OUTPUT); // Motor A
+pinMode(DIR2_PIN,OUTPUT); // Motor B
+pinMode(STEP2_PIN,OUTPUT); // Motor B  
+// ///////////////////////////////////////////////////
+
+
+// SET LCD ////////////////////////////////////////////
+lcd.clear();
+lcd.begin(20, 4); // 20 ROWS / 4 LINES
+
+  
+  
+// ///////////////////////////////////////////////////////////////////////////////////
+// DEFINING SOME AWESOME CHARACTERS HERE ///////////////////////////////////////////////
+
+      	uint8_t B_[8] =  {0x1f, 0x17, 0x17, 0x17, 0x17, 0x17, 0x11, 0x1f};
+    	uint8_t C_[8] =  {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f};
+        uint8_t D_[8] =  {0x17, 0x1b, 0x1d, 0x1e, 0x1d, 0x1b, 0x17, 0x1f};
+        uint8_t E_[8] =  {0x1f, 0x11, 0x15, 0x15, 0x11, 0x15, 0x15, 0x1f};
+        uint8_t F_[8] =  {0x1f, 0x11, 0x15, 0x13, 0x15, 0x15, 0x11, 0x1f}; 
+        uint8_t G_[8] =  {0x1f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+        uint8_t H_[8] =  {0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04};
+                       
+
+
+	lcd.createChar(1, B_);
+	lcd.createChar(2, C_);
+	lcd.createChar(3, D_);
+	lcd.createChar(4, E_);
+	lcd.createChar(5, F_);
+	lcd.createChar(6, G_);
+	lcd.createChar(7, H_);
+
+	lcd.home(); 
+// ///////////////////////////////////////////////////////////////////////////////////
+// ///////////////////////////////////////////////////////////////////////////////////
+  
+  
+
+    
+lcd.clear();
+lcd.setCursor(0,0); lcd.print("    \2\2\2\2\2\2\2\2\2\2\2\2    "); 
+lcd.setCursor(0,1); lcd.print("    Bumblebee\1\4\5    ");
+lcd.setCursor(0,2); lcd.print("    \6\6\6\6\6\6\6\6\6\6\6\6    "); 
+lcd.setCursor(0,3); lcd.print("    CC BY-SA 3.0   ");
+delay(3000);
+lcd.clear();
+  
+
+  
+  
+  lcd.setCursor(0, 1);
+  lcd.print("////////////////////");
+  lcd.setCursor(0, 2);
+  lcd.print("////////////////////");
+  lcd.setCursor(0, 3);
+  lcd.print("////////////////////");
+  lcd.setCursor(0, 4);
+  lcd.print("////////////////////");
+  delay(60);
+  
+
+  lcd.setCursor(0, 0);
+  lcd.print("--------------------");
+  lcd.setCursor(0, 1);
+  lcd.print("--------------------");
+  lcd.setCursor(0, 2);
+  lcd.print("--------------------");
+  lcd.setCursor(0, 3);
+  lcd.print("--------------------");
+  delay(60);
+  
+
+  lcd.setCursor(0, 0);
+  lcd.print("!!!!!!!!!!!!!!!!!!!!");
+  lcd.setCursor(0, 1);
+  lcd.print("!!!!!!!!!!!!!!!!!!!!");
+  lcd.setCursor(0, 2);
+  lcd.print("!!!!!!!!!!!!!!!!!!!!");
+  lcd.setCursor(0, 3);
+  lcd.print("!!!!!!!!!!!!!!!!!!!!");
+  delay(60);
+  
+  
+  lcd.setCursor(0, 0);
+  lcd.print("////////////////////");
+  lcd.setCursor(0, 1);
+  lcd.print("////////////////////");
+  lcd.setCursor(0, 2);
+  lcd.print("////////////////////");
+  lcd.setCursor(0, 3);
+  lcd.print("////////////////////");
+  delay(60);
+  
+  
+  
+
+  
+  
+
+   lcd.clear();   
+   lcd.setCursor(0, 0); lcd.print("\3General Setup(SxS)");
+   lcd.setCursor(0,1); lcd.print(">Calibration");
+   lcd.setCursor(0,2); lcd.print(">Presets");
+   lcd.setCursor(8,3); lcd.print("[OK]");
+   
+// ///////////////////////////////////////////////////
+
+
+
+
+
+
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void loop()
+
+
+{
+  
+  
+  
+  // ///////////////////////////////////////////////////////////////////////////////////
+// re-DEFINING SOME AWESOME CHARACTERS HERE ///////////////////////////////////////////////
+
+         	
+        uint8_t A_[8] =  {0x00, 0x01, 0x0e, 0x0a, 0x0e, 0x10, 0x00, 0x00}; // Diameter symbol 
+        uint8_t B_[8] =  {0x1d, 0x1b, 0x17, 0x0f, 0x17, 0x1b, 0x1d, 0x1f}; // "<" inverted 
+        uint8_t C_[8] =  {0x17, 0x1b, 0x1d, 0x1e, 0x1d, 0x1b, 0x17, 0x1f}; // ">" inverted
+        uint8_t E_[8] = {0x1e, 0x1e, 0x1e, 0x1e, 0x1e, 0x1e, 0x1e, 0x1e}; // Progression bar
+        uint8_t F_[8] = {0x1f, 0x1f, 0x1f, 0x00, 0x1f, 0x1f, 0x1f, 0x1f}; // "-" Inverted
+        uint8_t G_[8] = {0x1f, 0x1b, 0x1b, 0x00, 0x1b, 0x1b, 0x1f, 0x1f}; // "+" Inverted
+        uint8_t H_[8] = {0x1f, 0x1f, 0x15, 0x1b, 0x1b, 0x15, 0x1f, 0x1f}; // Block x'ed   
+        
+                       
+	
+        lcd.createChar(1, A_); // Diameter symbol
+        lcd.createChar(2, B_); // "<" inverted
+        lcd.createChar(3, C_); // ">" inverted
+        lcd.createChar(4, E_); // Progression bar
+        lcd.createChar(5, F_); // "-" Inverted
+        lcd.createChar(6, G_); // "+" Inverted
+        lcd.createChar(7, H_); // Block x'ed 
+        
+        
+
+
+	lcd.home(); 
+// ///////////////////////////////////////////////////////////////////////////////////
+// ///////////////////////////////////////////////////////////////////////////////////
+  
+// Setting up type of values here //////////////////////////////////
+int Layers;
+int Cycle;
+int Steps;
+float StepsB;
+long GlobalCycle;
+int Bar;
+int BarChar;
+float LayerPC;
+float GlobalSet;
+
+int MotorA;
+
+int PauseA;
+PauseA=0;
+
+int PauseB;
+PauseB=0;
+
+
+
+
+GlobalSet= (RWSvalue*LYRvalue); // This is the amount of total Cyles of the programm
+GlobalCycle=0; // This will count the cyles
+
+
+
+
+  
+int key = 0;
+adc_key_in = analogRead(0); // read the value from the sensor
+key = get_key(adc_key_in); // convert into key press
+// ////////////////////////////////////////////////////////////////// 
+
+
+
+
+
+// MENU LOOP STARTS HERE ///////////////////////////////////////////////// 
+
+if (key != oldkey) // if keypress is detected
+{ // (key != oldkey) loop 1 /////////////////////////////////////////////
+delay(50); // wait for debounce time
+adc_key_in = analogRead(0); // read the value from the sensor
+key = get_key(adc_key_in); // convert into key press
+if (key != oldkey)
+
+{ // if key ! oldkey 2 /////////// 
+oldkey = key;
+if (key >=0)
+{ // if key loop /////////
+  
+
+
+
+switch(General)  { // Swtich Menu
+
+
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// 
+/// GENERAL SETUP /////////////// GENERAL SETUP /////////////// GENERAL SETUP /////////////// GENERAL SETUP /////////////// GENERAL SETUP /////////////// 
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////  
+
+
+ case -4: // Case 0, TOP Menu //////////////////
+ switch (key){
+
+   
+   case rightKey:
+   break;
+   
+   
+   case upKey:
+   break;
+
+
+
+   case downKey:
+   break;
+   
+   
+   
+   case leftKey:
+   break;
+   
+   
+   
+   case selectKey:
+   General = (General + 1);
+   lcd.clear();
+   lcd.setCursor(0, 0); lcd.print("\3General Setup(SxS)");
+   lcd.setCursor(0,1); lcd.print(">Calibration");
+   lcd.setCursor(0,2); lcd.print(">Presets");
+   lcd.setCursor(8,3); lcd.print("[\7\7]");
+   delay(250);
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("005>GlobalSpeed:"); lcd.print(VOM[v]);
+   lcd.setCursor(0,1); lcd.print("      [+Speed]");
+   lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");
+   lcd.setCursor(0,3); lcd.print("      [-Speed]");
+   break; 
+  
+  
+ }  
+ 
+ break;
+
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////  
+/// GENERAL SETUP /////////////// GENERAL SETUP /////////////// GENERAL SETUP /////////////// GENERAL SETUP /////////////// GENERAL SETUP /////////////// 
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// 
+/// SPEED OF MOTOR SET /////////////// SPEED OF MOTOR SET /////////////// SPEED OF MOTOR SET /////////////// SPEED OF MOTOR SET /////////////// 
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////  
+ 
+ case -3: 
+ switch (key){ // Case Motor Speed //////////////////
+
+   
+    case downKey:
+    v++;
+    if (v>13){v=13;}
+    lcd.clear();
+    lcd.setCursor(0,0); lcd.print("005>GlobalSpeed:"); lcd.print(VOM[v]);
+    lcd.setCursor(0,1); lcd.print("      [+Speed]");
+    lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");
+    lcd.setCursor(0,3); lcd.print("      [\5Speed]");
+    VOMvalue = VOM[v];
+    delay(100);
+    lcd.setCursor(0,3); lcd.print("      [-Speed]");
+    break;
+
+    
+    case upKey:
+    v--;
+    if (v<0){v=0;}
+    lcd.clear();
+    lcd.setCursor(0,0); lcd.print("005>GlobalSpeed:"); lcd.print(VOM[v]);
+    lcd.setCursor(0,1); lcd.print("      [\5Speed]");
+    lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");
+    lcd.setCursor(0,3); lcd.print("      [-Speed]");
+    VOMvalue = VOM[v];
+    delay(100);
+    lcd.setCursor(0,1); lcd.print("      [+Speed]");
+    break;
+    
+    
+    
+    
+    case leftKey: 
+    lcd.setCursor(0,2); lcd.print("[\2Move] [OK] [>Move]");   
+    VOMvalue = VOM[v];
+    // /////////////////////////////////////////////////////////////////////////////
+    // 360 DEGREES BACK AND FORTH FOR MOTOR A  POSITIVE DIRECTION //////////////////////
+    // ///////////////////////////////////////////////////////////////////////////////////////////      
+    for (MoveMotor=0; MoveMotor <= MOTOR; MoveMotor++) 
+    {                    
+    digitalWrite(DIR1_PIN, LOW); // Set the direction for Motor B (Wire holder)
+    digitalWrite(STEP1_PIN, LOW); // Move Motor B (Wire holder)
+    digitalWrite(STEP1_PIN, HIGH); // Move Motor B (Wire holder)
+    delayMicroseconds(VOMvalue);
+    }
+    
+   
+    // ///////////////////////////////////////////////////////////////////////////////////////////
+     for (MoveMotor=0; MoveMotor <= MOTOR; MoveMotor++) 
+    {                    
+    digitalWrite(DIR1_PIN, HIGH); // Set the direction for Motor B (Wire holder)
+    digitalWrite(STEP1_PIN, LOW); // Move Motor B (Wire holder)
+    digitalWrite(STEP1_PIN, HIGH); // Move Motor B (Wire holder)
+    delayMicroseconds(VOMvalue);
+    } 
+    // /////////////////////////////////////////////////////////////////////////////////////////// 
+    // 360 DEGREES BACK AND FORTH FOR MOTOR A  POSITIVE DIRECTION //////////////////////
+    // ////////////////////////////////////////////////////////////////////////////                                                   
+    lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");
+    break;
+    
+    
+    
+    
+    case rightKey:
+    lcd.setCursor(0,2); lcd.print("[<Move] [OK] [\3Move]");
+    VOMvalue = VOM[v];
+    // /////////////////////////////////////////////////////////////////////////////
+    // 360 DEGREES BACK AND FORTH FOR MOTOR A NEGATIVE DIRECTION //////////////////////
+    // ///////////////////////////////////////////////////////////////////////////////////////////    
+    for (MoveMotor=0; MoveMotor <= MOTOR; MoveMotor++) 
+    {                    
+    digitalWrite(DIR1_PIN, HIGH); // Set the direction for Motor B (Wire holder)
+    digitalWrite(STEP1_PIN, LOW); // Move Motor B (Wire holder)
+    digitalWrite(STEP1_PIN, HIGH); // Move Motor B (Wire holder)
+    delayMicroseconds(VOMvalue);
+    }
+    
+   
+    // ///////////////////////////////////////////////////////////////////////////////////////////
+     for (MoveMotor=0; MoveMotor <= MOTOR; MoveMotor++) 
+    {                    
+    digitalWrite(DIR1_PIN, LOW); // Set the direction for Motor B (Wire holder)
+    digitalWrite(STEP1_PIN, LOW); // Move Motor B (Wire holder)
+    digitalWrite(STEP1_PIN, HIGH); // Move Motor B (Wire holder)
+    delayMicroseconds(VOMvalue);
+    } 
+    // /////////////////////////////////////////////////////////////////////////////////////////// 
+    // 360 DEGREES BACK AND FORTH FOR MOTOR A  NEGATIVE DIRECTION //////////////////////
+    // ////////////////////////////////////////////////////////////////////////////
+    lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");       
+    break;
+    
+    
+
+
+
+
+   
+   case selectKey:
+   General = (General + 1);
+   VOMvalue = VOM[v];
+   lcd.setCursor(8,2); lcd.print("[\7\7]");
+   delay(250);
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("010>MotorA_CAL+:"); 
+   lcd.setCursor(16,0); lcd.print(STP[s]);    
+   lcd.setCursor(0,1); lcd.print("      [+Steps]");
+   lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");
+   lcd.setCursor(0,3); lcd.print("      [-Steps]");
+   break; 
+  
+
+
+
+  
+  
+ }  // Case Motor Speed //////////////////
+ 
+ break;
+
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// SPEED OF MOTOR SET /////////////// SPEED OF MOTOR SET /////////////// SPEED OF MOTOR SET /////////////// SPEED OF MOTOR SET /////////////// 
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// 
+/// Case Motor A Calibration ////////////Case Motor A Calibration ////////////Case Motor A Calibration ////////////Case Motor A Calibration ////////////
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////  
+
+
+case -2:  // Case Motor A Calibration ////////////
+switch (key){ 
+    
+  
+    case upKey:
+    s++;
+    if (s>13){s=13;}
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("010>MotorA_CAL+:"); 
+   lcd.setCursor(16,0); lcd.print(STP[s]);    
+   lcd.setCursor(0,1); lcd.print("      [\6Steps]");
+   lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");
+   lcd.setCursor(0,3); lcd.print("      [-Steps]");
+   delay(100);
+   lcd.setCursor(0,1); lcd.print("      [+Steps]");
+   break;
+
+    
+    case downKey:
+    s--;
+    if (s<0){s=0;}
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("010>MotorA_CAL+:"); 
+   lcd.setCursor(16,0); lcd.print(STP[s]);    
+   lcd.setCursor(0,1); lcd.print("      [+Steps]");
+   lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");
+   lcd.setCursor(0,3); lcd.print("      [\5Steps]");
+   delay(100);
+   lcd.setCursor(0,3); lcd.print("      [-Steps]");
+   break;
+    
+  
+   case leftKey:
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("010>MotorA_CAL+:"); 
+   lcd.setCursor(16,0); lcd.print(STP[s]);    
+   lcd.setCursor(0,1); lcd.print("      [+Steps]");
+   lcd.setCursor(0,2); lcd.print("[\2Move] [OK] [>Move]");
+   lcd.setCursor(0,3); lcd.print("      [-Steps]");
+    // ///////////////////////////////////////////////////////////////////////////////////////////
+    // MOVING MOTOR B ON %2 STATE ////////////////////////////////////////////////////////////////
+    // ///////////////////////////////////////////////////////////////////////////////////////////    
+    for (MoveMotor=0; MoveMotor <= STP[s]; MoveMotor++) 
+    {                    
+    digitalWrite(DIR1_PIN, LOW); // Set the direction for Motor B (Wire holder)
+    digitalWrite(STEP1_PIN, LOW); // Move Motor B (Wire holder)
+    digitalWrite(STEP1_PIN, HIGH); // Move Motor B (Wire holder)
+    delayMicroseconds(VOMvalue);
+    }
+    // ///////////////////////////////////////////////////////////////////////////////////////////
+    // MOVING MOTOR B ON %2 STATE /////////////////////////////////////////////////////////////////
+    // //////////////////////////////////////////////////////////////////////////////////////////// 
+    delay(100);
+    lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");    
+    break;
+
+    
+   case rightKey:
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("010>MotorA_CAL+:"); 
+   lcd.setCursor(16,0); lcd.print(STP[s]);    
+   lcd.setCursor(0,1); lcd.print("      [+Steps]");
+   lcd.setCursor(0,2); lcd.print("[<Move] [OK] [\3Move]");
+   lcd.setCursor(0,3); lcd.print("      [-Steps]");
+    // ///////////////////////////////////////////////////////////////////////////////////////////
+    // MOVING MOTOR B ON %2 STATE ////////////////////////////////////////////////////////////////
+    // ///////////////////////////////////////////////////////////////////////////////////////////    
+    for (MoveMotor=0; MoveMotor <= STP[s]; MoveMotor++) 
+    {                   
+    digitalWrite(DIR1_PIN, HIGH); // Set the direction for Motor B (Wire holder)
+    digitalWrite(STEP1_PIN, LOW); // Move Motor B (Wire holder)
+    digitalWrite(STEP1_PIN, HIGH); // Move Motor B (Wire holder)
+    delayMicroseconds(VOMvalue);
+    }
+    // ///////////////////////////////////////////////////////////////////////////////////////////
+    // MOVING MOTOR B ON %2 STATE /////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////////////////////////////////
+    delay(100);
+    lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");    
+    break;
+    
+    
+    
+   case selectKey:
+   General = (General + 1);
+   s = 1;
+   lcd.setCursor(8,2); lcd.print("[\7\7]");
+   delay(250);
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("015>MotorB_CAL+:");
+   lcd.setCursor(16,0); lcd.print(STP[s]);
+   lcd.setCursor(0,1); lcd.print("      [+Steps]");
+   lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");
+   lcd.setCursor(0,3); lcd.print("      [-Steps]");
+   break;
+    
+    
+  } // Case Motor A Calibration ////////////
+  break;
+
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// 
+/// Case Motor A Calibration ////////////Case Motor A Calibration ////////////Case Motor A Calibration ////////////Case Motor A Calibration ////////////
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// 
+
+
+
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// 
+/// Case Motor B Calibration ////////////////// Case Motor B Calibration ////////////////// Case Motor B Calibration ////////////////// Case Motor B Calibration ////////////////// 
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////  
+
+
+case -1:  // Case Motor B Calibration ////////////
+switch (key){ 
+    
+  
+    case upKey:
+    s++;
+    if (s>13){s=13;}
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("015>MotorB_CAL+:");
+   lcd.setCursor(16,0); lcd.print(STP[s]);
+   lcd.setCursor(0,1); lcd.print("      [\6Steps]");
+   lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");
+   lcd.setCursor(0,3); lcd.print("      [-Steps]");
+   delay(100);
+   lcd.setCursor(0,1); lcd.print("      [+Steps]");
+    break;
+
+    
+    case downKey:
+    s--;
+    if (s<0){s=0;}
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("015>MotorB_CAL+:");
+   lcd.setCursor(16,0); lcd.print(STP[s]);
+   lcd.setCursor(0,1); lcd.print("      [+Steps]");
+   lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");
+   lcd.setCursor(0,3); lcd.print("      [\5Steps]");
+   delay(100);
+   lcd.setCursor(0,3); lcd.print("      [-Steps]");
+    break;
+    
+  
+    case leftKey:
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("015>MotorB_CAL+:");
+   lcd.setCursor(16,0); lcd.print(STP[s]);
+   lcd.setCursor(0,1); lcd.print("      [+Steps]");
+   lcd.setCursor(0,2); lcd.print("[\2Move] [OK] [>Move]");
+   lcd.setCursor(0,3); lcd.print("      [-Steps]");
+   
+    // ///////////////////////////////////////////////////////////////////////////////////////////
+    // MOVING MOTOR B ON %2 STATE ////////////////////////////////////////////////////////////////
+    // ///////////////////////////////////////////////////////////////////////////////////////////    
+    for (MoveMotor=0; MoveMotor <= STP[s]; MoveMotor++) 
+    {                    
+    digitalWrite(DIR2_PIN, LOW); // Set the direction for Motor B (Wire holder)
+    digitalWrite(STEP2_PIN, LOW); // Move Motor B (Wire holder)
+    digitalWrite(STEP2_PIN, HIGH); // Move Motor B (Wire holder)
+    delayMicroseconds(VOMvalue);
+    }
+    // ///////////////////////////////////////////////////////////////////////////////////////////
+    // MOVING MOTOR B ON %2 STATE /////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////////////////////////////////
+    delay(100);    
+    lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");
+    break;
+
+    
+    case rightKey:
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("015>MotorB_CAL+:");
+   lcd.setCursor(16,0); lcd.print(STP[s]);
+   lcd.setCursor(0,1); lcd.print("      [+Steps]");
+   lcd.setCursor(0,2); lcd.print("[<Move] [OK] [\3Move]");
+   lcd.setCursor(0,3); lcd.print("      [-Steps]");
+    // ///////////////////////////////////////////////////////////////////////////////////////////
+    // MOVING MOTOR B ON %2 STATE ////////////////////////////////////////////////////////////////
+    // ///////////////////////////////////////////////////////////////////////////////////////////    
+    for (MoveMotor=0; MoveMotor <= STP[s]; MoveMotor++) 
+    {                   
+    digitalWrite(DIR2_PIN, HIGH); // Set the direction for Motor B (Wire holder)
+    digitalWrite(STEP2_PIN, LOW); // Move Motor B (Wire holder)
+    digitalWrite(STEP2_PIN, HIGH); // Move Motor B (Wire holder)
+    delayMicroseconds(VOMvalue);
+    }
+    // ///////////////////////////////////////////////////////////////////////////////////////////
+    // MOVING MOTOR B ON %2 STATE /////////////////////////////////////////////////////////////////
+    // //////////////////////////////////////////////////////////////////////////////////////////// 
+    delay(100);    
+    lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");    
+    break;
+    
+    
+    
+   case selectKey:
+   General = (General + 1);
+   lcd.setCursor(8,2); lcd.print("[\7\7]");
+   delay(250);
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("020>Cmp:"); lcd.setCursor(8,0); lcd.print(Compensation);
+   lcd.setCursor(14,0); lcd.print("S:"); lcd.print(STP[s]);
+   lcd.setCursor(0,1); lcd.print("      [+Steps]");
+   lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");
+   lcd.setCursor(0,3); lcd.print("      [-Steps]");   
+   
+   break;
+   
+    
+    
+  } // Case Motor B Calibration ////////////
+  break;
+
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////   
+/// Case Motor B Calibration ////////////////// Case Motor B Calibration ////////////////// Case Motor B Calibration ////////////////// Case Motor B Calibration ////////////////// 
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// 
+/// Case Compensation FOR MOTOR B //////////////// Case Compensation FOR MOTOR B //////////////// Case Compensation FOR MOTOR B //////////////// Case Compensation FOR MOTOR B //////////
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+case 0:  
+switch (key){ // Case Compensation ////////////
+    
+  
+    case upKey:
+    s++;
+    if (s>13){s=13;}
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("020>Cmp:"); lcd.setCursor(8,0); lcd.print(Compensation);
+   lcd.setCursor(14,0); lcd.print("S:"); lcd.print(STP[s]);
+   lcd.setCursor(0,1); lcd.print("      [\6Steps]");
+   lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");
+   lcd.setCursor(0,3); lcd.print("      [-Steps]");
+   delay(100);
+   lcd.setCursor(0,1); lcd.print("      [+Steps]");
+   
+   break;
+
+   
+   
+    
+    case downKey:
+    s--;
+    if (s<0){s=0;}
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("020>Cmp:"); lcd.setCursor(8,0); lcd.print(Compensation);
+   lcd.setCursor(14,0); lcd.print("S:"); lcd.print(STP[s]);
+   lcd.setCursor(0,1); lcd.print("      [+Steps]");
+   lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");
+   lcd.setCursor(0,3); lcd.print("      [\5Steps]");
+   delay(100);
+   lcd.setCursor(0,3); lcd.print("      [-Steps]");
+   
+   break;
+    
+  
+    case leftKey:    
+    // ///////////////////////////////////////////////////////////////////////////////////////////
+    // MOVING MOTOR B -- ////////////////////////////////////////////////////////////////
+    // /////////////////////////////////////////////////////////////////////////////////////////// 
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("020>Cmp:"); lcd.setCursor(8,0); lcd.print(Compensation);
+   lcd.setCursor(14,0); lcd.print("S:"); lcd.print(STP[s]);
+   lcd.setCursor(0,1); lcd.print("      [+Steps]");
+   lcd.setCursor(0,2); lcd.print("[\2Move] [OK] [>Move]");
+   lcd.setCursor(0,3); lcd.print("      [-Steps]");   
+   
+    for (MoveMotor=1; MoveMotor <= STP[s]; MoveMotor++) 
+    {
+    Compensation--; 
+    digitalWrite(DIR2_PIN, LOW); // Set the direction for Motor B (Wire holder)
+    digitalWrite(STEP2_PIN, LOW); // Move Motor B (Wire holder)
+    digitalWrite(STEP2_PIN, HIGH); // Move Motor B (Wire holder)
+    delayMicroseconds(160);
+    lcd.setCursor(8,0); lcd.print(Compensation);
+    }
+    lcd.setCursor(8,0); lcd.print("      ");
+    lcd.setCursor(8,0); lcd.print(Compensation);
+    // ///////////////////////////////////////////////////////////////////////////////////////////
+    // MOVING MOTOR B --  /////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////////////////////////////////                                                  
+    delay(100);
+    lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");
+    break;
+
+    
+    case rightKey:
+    // ///////////////////////////////////////////////////////////////////////////////////////////
+    // MOVING MOTOR B  ++ ////////////////////////////////////////////////////////////////
+    // /////////////////////////////////////////////////////////////////////////////////////////// 
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("020>Cmp:"); lcd.setCursor(8,0); lcd.print(Compensation);
+   lcd.setCursor(14,0); lcd.print("S:"); lcd.print(STP[s]);
+   lcd.setCursor(0,1); lcd.print("      [+Steps]");
+   lcd.setCursor(0,2); lcd.print("[<Move] [OK] [\3Move]");
+   lcd.setCursor(0,3); lcd.print("      [-Steps]");   
+    for (MoveMotor=1; MoveMotor <= STP[s]; MoveMotor++) 
+    {
+    Compensation++;      
+    digitalWrite(DIR2_PIN, HIGH); // Set the direction for Motor B (Wire holder)
+    digitalWrite(STEP2_PIN, LOW); // Move Motor B (Wire holder)
+    digitalWrite(STEP2_PIN, HIGH); // Move Motor B (Wire holder)
+    delayMicroseconds(160);
+    lcd.setCursor(8,0); lcd.print(Compensation);
+    }
+    lcd.setCursor(8,0); lcd.print("      ");
+    lcd.setCursor(8,0); lcd.print(Compensation);
+    delay(100);
+    lcd.setCursor(0,2); lcd.print("[<Move] [OK] [>Move]");
+    // ///////////////////////////////////////////////////////////////////////////////////////////
+    // MOVING MOTOR B ++ /////////////////////////////////////////////////////////////////
+    // ////////////////////////////////////////////////////////////////////////////////////////////                                                  
+    break;
+    
+    
+    
+   case selectKey:
+   General = (General + 1);
+   lcd.setCursor(8,2); lcd.print("[\7\7]");
+   delay(250);
+    AWGvalue = AWG[w];
+    WireDiameter = 0.3248*exp(-0.1159 * AWGvalue );  // Formula to calculate wire diameter out of AWG.
+   
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("025>AWG:"); lcd.setCursor(8,0); lcd.print(AWG[w]);
+   lcd.setCursor(10,0); lcd.print("="); lcd.write(1); lcd.print(WireDiameter,6);
+   lcd.setCursor(0,2); lcd.print("[-AWG]  [OK]  [+AWG]");
+
+    break;
+    
+    
+  } // Case Compensation ////////////
+  break;
+
+
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// Case Compensation FOR MOTOR B //////////////// Case Compensation FOR MOTOR B //////////////// Case Compensation FOR MOTOR B //////////////// Case Compensation FOR MOTOR B //////////
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////  
+/// AWG VALUE /////////////// AWG VALUE /////////////// AWG VALUE /////////////// AWG VALUE /////////////// AWG VALUE ////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+case 1:  // Case 1, AWG menu ////////////
+switch (key){ 
+  
+      
+
+    
+    case rightKey:
+    w++;
+    if (w>39){w=39;}
+    AWGvalue = AWG[w];
+    WireDiameter = 0.3248*exp(-0.1159 * AWGvalue );  // Formula to calculate wire diameter out of AWG.
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("025>AWG:"); lcd.setCursor(8,0); lcd.print(AWG[w]);
+   lcd.setCursor(10,0); lcd.print("="); lcd.write(1); lcd.print(WireDiameter,6);
+   lcd.setCursor(0,2); lcd.print("[-AWG]  [OK]  [\6AWG]");
+   delay(100);
+   lcd.setCursor(0,2); lcd.print("[-AWG]  [OK]  [+AWG]");
+    break;
+    
+    case leftKey:
+    w--;
+    if (w<0){w=0;}
+    AWGvalue = AWG[w];
+    WireDiameter = 0.3248*exp(-0.1159 * AWGvalue );  // Formula to calculate wire diameter out of AWG.
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("025>AWG:"); lcd.setCursor(8,0); lcd.print(AWG[w]);
+   lcd.setCursor(10,0); lcd.print("="); lcd.write(1); lcd.print(WireDiameter,6);
+   lcd.setCursor(0,2); lcd.print("[\5AWG]  [OK]  [+AWG]");
+   delay(100);
+   lcd.setCursor(0,2); lcd.print("[-AWG]  [OK]  [+AWG]");
+    break;
+    
+    case upKey:
+    break;
+    
+    case downKey:
+    break; 
+    
+    case selectKey:
+    General = (General + 1);
+   lcd.setCursor(8,2); lcd.print("[\7\7]");
+   delay(250);
+    AWGvalue = AWG[w];
+    WireDiameter = 0.3248*exp(-0.1159 * AWGvalue );  // Formula to calculate wire diameter out of AWG.
+    Coil = (WireDiameter/StepCoil); // Formula to determine how many steps per revolution moves the winder motor
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("030>Rows(RWS):"); lcd.setCursor(14, 0); lcd.print(RWS[r]);
+   lcd.setCursor(0,2); lcd.print("[-RWS]  [OK]  [+RWS]");
+    
+    break; 
+    
+    
+  } // Case AWG menu ////////////
+  break;
+  
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// AWG VALUE /////////////// AWG VALUE /////////////// CAWG VALUE /////////////// AWG VALUE /////////////// AWG VALUE ////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// 
+/// ROWS VALUE /////////////// ROWS VALUE /////////////// ROWS VALUE /////////////// ROWS VALUE /////////////// ROWS VALUE /////////////// ROWS VALUE /////////////// 
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+  case 2: // Case Rows Menu //////////
+  switch (key){
+    
+    case rightKey:
+    r++;
+    if (r>99){r=99;}
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("030>Rows(RWS):"); lcd.setCursor(14, 0); lcd.print(RWS[r]);
+   lcd.setCursor(0,2); lcd.print("[-RWS]  [OK]  [\6RWS]");
+   delay(100);
+   lcd.setCursor(0,2); lcd.print("[-RWS]  [OK]  [+RWS]");
+    break; 
+
+    case leftKey:
+    r--;
+    if (r<0){r=0;}
+   lcd.clear();
+   lcd.setCursor(0,0); lcd.print("030>Rows(RWS):"); lcd.setCursor(14, 0); lcd.print(RWS[r]);
+   lcd.setCursor(0,2); lcd.print("[\5RWS]  [OK]  [+RWS]");
+   delay(100);
+   lcd.setCursor(0,2); lcd.print("[-RWS]  [OK]  [+RWS]");
+    break; 
+  
+    case upKey:
+    break;
+
+    
+    case downKey:
+    break;
+   
+    
+    case selectKey:
+    General = (General + 1);
+    lcd.setCursor(8,2); lcd.print("[\7\7]");
+    delay(250);
+    RWSvalue = RWS[r];
+    lcd.clear();
+    lcd.setCursor(0,0); lcd.print("035>Layers(LYR):"); lcd.setCursor(16, 0); lcd.print(LYR[l]);
+    lcd.setCursor(0,2); lcd.print("[-LYR]  [OK]  [+LYR]");
+    
+    
+    break;
+  
+
+}
+break;
+
+
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// ROWS VALUE /////////////// ROWS VALUE /////////////// ROWS VALUE /////////////// ROWS VALUE /////////////// ROWS VALUE /////////////// ROWS VALUE /////////////// 
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////   
+    
+
+
+
+
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////  
+/// LAYERS VALUE ///////////////   LAYERS VALUE ///////////////   LAYERS VALUE ///////////////   LAYERS VALUE ///////////////   LAYERS VALUE ///////////////  
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  
+case 3: // Case Layers Menu ////////    
+switch (key){
+    
+    case rightKey:
+    l++;
+    if (l>99){l=99;}
+    lcd.clear();
+    lcd.setCursor(0,0); lcd.print("035>Layers(LYR):"); lcd.setCursor(16, 0); lcd.print(LYR[l]);
+    lcd.setCursor(0,2); lcd.print("[-LYR]  [OK]  [\6LYR]");
+    delay(100);
+    lcd.setCursor(0,2); lcd.print("[-LYR]  [OK]  [+LYR]");
+    
+    break;
+    
+    
+    
+    case leftKey:
+    l--;
+    if (l<0){l=0;}
+    lcd.clear();
+    lcd.setCursor(0,0); lcd.print("035>Layers(LYR):"); lcd.setCursor(16, 0); lcd.print(LYR[l]);
+    lcd.setCursor(0,2); lcd.print("[\5LYR]  [OK]  [+LYR]");
+    delay(100);
+    lcd.setCursor(0,2); lcd.print("[-LYR]  [OK]  [+LYR]");
+    
+    break;
+    
+    
+    
+    case upKey:
+    break;  
+    
+    
+    case downKey:
+    break;
+    
+    
+    
+// ////////////////////////////////////////////////////////////
+// SHOW ALL THE SET VALUES ////////////////////////////////////  
+    case selectKey:
+    General = ( General + 1 );
+    LYRvalue = LYR[l];
+
+    lcd.clear();
+    lcd.setCursor(0,2); lcd.print("[-LYR]  [\7\7]  [+LYR]");
+    delay(250);
+    
+    lcd.clear();    
+    lcd.setCursor(0,0); lcd.print("RWS:"); lcd.print(RWSvalue); lcd.setCursor(9,0); lcd.print("SPEED:"); lcd.print(VOMvalue);    
+    lcd.setCursor(0,1); lcd.print("LYR:"); lcd.print(LYRvalue); lcd.setCursor(9,1); lcd.print("LCOMP:"); lcd.print(Compensation);
+    lcd.setCursor(0,2); lcd.print("AWG:"); lcd.print(AWG[w]); lcd.print(" / "); lcd.write(1); lcd.print(WireDiameter,6); lcd.write(34);   
+    lcd.setCursor(0,3); lcd.print("       [NEXT]"); 
+    
+    break;
+// ////////////////////////////////////////////////////////////
+
+
+  } // 
+break;
+
+
+
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////  
+/// LAYERS VALUE ///////////////   LAYERS VALUE ///////////////   LAYERS VALUE ///////////////   LAYERS VALUE ///////////////   LAYERS VALUE ///////////////  
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+// /////////////////////////////////////////////////////////////////////////////////////////////  
+// ///////////////////////////////////////////////////////////////////////////////////////////// 
+// /////////////////////////////////////////////////////////////////////////////////////////////  
+// /////////////////////////////////////////////////////////////////////////////////////////////  
+// /////////////////////////////////////////////////////////////////////////////////////////////
+// CASE RESPONSIBLE FOR THE MAIN RUNNING PROGRAM ///////////////////////////////////////////////  
+// /////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+case 4: // Case Values display //////////
+switch (key){ // THIS BRACKET WRAP THE WHOLE PROGRAMM /////////////////////////////////////////
+    
+    case upKey:
+    General = 3;
+    RWS[r] = RWSvalue;
+    AWG[w] = AWGvalue;
+    LYR[l] = LYRvalue;
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("Layers(LYR): ");
+    lcd.print(LYR[l]);
+    lcd.setCursor(0,1);
+    lcd.print(" (-)  [OK]  (+)");
+    break;
+
+    
+    case downKey:
+    General = 1;
+    RWS[r] = RWSvalue;
+    AWG[w] = AWGvalue;
+    LYR[l] = LYRvalue;
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Gauge (AWG): ");
+    lcd.print(AWG[w]);
+    lcd.setCursor(0, 1);
+    lcd.print(" (-)  [OK]  (+)");
+    break;    
+
+// //////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////
+// ///////////////////////////////////////////////////////////////////////
+// THIS 'CASE SELECTKEY' STARTS THE PROGRAMM ////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////////////
+// ///////////////////////////////////////////////////////////////////////////////////////
+// ///////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////
+
+case selectKey:
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ // PROGRAMM LOOP START HERE   /////////////////////////////////////////////////////////////////////////////////////////////////////////// 
+
+
+// /////////////////////////////////////////////////////////////
+// SET MAIN DATA DISPLAY ///////////////////////////////////////
+
+
+
+
+lcd.clear();
+lcd.setCursor(0,0); lcd.print(">>RWS@:   "); lcd.setCursor(10,0); lcd.print("\4RWS:"); lcd.print(RWSvalue);
+lcd.setCursor(0,1); lcd.print(">>LYR@:   "); lcd.setCursor(10,1); lcd.print("\4LYR:"); lcd.print(LYRvalue);
+lcd.setCursor(0,2); lcd.print("R-----%   "); lcd.setCursor(10,2); lcd.print("\4COMP:"); lcd.print(Compensation);
+lcd.setCursor(0,3); lcd.print("GLOBAL%   "); lcd.setCursor(10,3); lcd.print("\4ET:00'00'");
+delay(2000); 
+
+
+// /////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////
+
+
+
+            
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// LAYER STARTS HERE ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////  
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+          for (Layers = 0; Layers < LYRvalue; Layers++) // This is the global amounts of Layers (NEEDS BAILOUT!!!) 
+          {
+
+
+            
+// /////////////////////////////////////////////////////////////////////////////////////////////           
+// MoveMotor Compensation /////////////////////////////////////////////////////////////////////////////// 
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+          if (Layers%2==0) // Only true for even pases of 'Layers'                   
+                        {
+
+                        // ///////////////////////////////////////////////////////////////////////////////////////////
+                        // MOVING MOTOR B ON %2 STATE ////////////////////////////////////////////////////////////////
+                        // ///////////////////////////////////////////////////////////////////////////////////////////    
+    
+                          for (MoveMotor=1; MoveMotor <= Compensation; MoveMotor++) 
+                        {
+
+                          // lcd.setCursor(13,0); lcd.print("   ");
+                          // lcd.setCursor(9,0); lcd.print("*>"); // Print Direction
+                          lcd.setCursor(0,0); lcd.print("+>");
+                          lcd.setCursor(0,1); lcd.print("--");
+                          lcd.setCursor(7,1); lcd.print(Layers);
+                          lcd.setCursor(1,2); lcd.print("COMP>");                        
+                          digitalWrite(DIR2_PIN, LOW); // Set the direction for Motor B (Wire holder)
+                          digitalWrite(STEP2_PIN, LOW); // Move Motor B (Wire holder)
+                          digitalWrite(STEP2_PIN, HIGH); // Move Motor B (Wire holder)
+                          delayMicroseconds(28000);
+                                                 
+                        }
+                        
+                        // ///////////////////////////////////////////////////////////////////////////////////////////
+                        // MOVING MOTOR B ON %2 STATE /////////////////////////////////////////////////////////////////
+                        // ////////////////////////////////////////////////////////////////////////////////////////////   
+                        
+                        delay(500);
+                        lcd.setCursor(0,0); lcd.print(">>"); // Print Direction
+                        lcd.setCursor(7,0); lcd.print("   "); // Print Direction
+                        lcd.setCursor(0,1); lcd.print("**"); // Print Direction
+                      }
+                      
+                      
+            if (Layers%2!=0) // Only true for odds pases of 'Layers'  
+                        
+                      {
+                        for (MoveMotor=1; MoveMotor <= Compensation; MoveMotor++) 
+                        {
+                        // ///////////////////////////////////////////////////////////////////////////////////////////
+                        // MOVING MOTOR B ON !%2 STATE ///////////////////////////////////////////////////////////////
+                        // /////////////////////////////////////////////////////////////////////////////////////////// 
+                          // lcd.setCursor(13,0); lcd.print("   ");
+                          // lcd.setCursor(9,0); lcd.print("*<"); // Print Direction
+                          lcd.setCursor(0,0); lcd.print("+<");
+                          lcd.setCursor(0,1); lcd.print("--");
+                          lcd.setCursor(7,1); lcd.print(Layers);
+                          lcd.setCursor(1,2); lcd.print("COMP<");
+                          
+                          digitalWrite(DIR2_PIN, HIGH); // Set the direction for Motor B (Wire holder)
+                          digitalWrite(STEP2_PIN, LOW); // Move Motor B (Wire holder)
+                          digitalWrite(STEP2_PIN, HIGH); // Move Motor B (Wire holder)
+                          delayMicroseconds(28000);
+                        
+                        // ///////////////////////////////////////////////////////////////////////////////////////////
+                        // MOVING MOTOR B ON !%2 STATE ///////////////////////////////////////////////////////////////
+                        // /////////////////////////////////////////////////////////////////////////////////////////// 
+                         }
+                         delay(500);
+                         lcd.setCursor(0,0); lcd.print("<<"); // Print Direction
+                         lcd.setCursor(7,0); lcd.print("   "); // Print Direction
+                         lcd.setCursor(0,1); lcd.print("**"); // Print Direction
+                      } 
+        
+                       
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////            
+// MoveMotor Compensation ///////////////////////////////////////////////////////////////////////////////// 
+// ///////////////////////////////////////////////////////////////////////////////////////////////        
+        
+        
+
+
+
+        
+
+        
+        
+
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// STARRTS FOR CYCLE /////////////////////////////////////////////////////////////////////////////////////////
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////        
+        
+          
+          for (Cycle = 0; Cycle < RWSvalue; Cycle++)
+          { // Cycle
+           GlobalCycle++;
+           
+ 
+
+
+
+ 
+ 
+          
+           
+
+          for (Steps = 0; Steps < MOTOR; Steps++) 
+          { // Steps
+
+
+          
+                    // Motor A (The coil holder) /////////////////////////////////////////////////////
+                    digitalWrite(DIR1_PIN, LOW); // Set the direction for Motor A (The coil holder)
+                    digitalWrite(STEP1_PIN, LOW); // Move Motor A (The coil holder)
+                    digitalWrite(STEP1_PIN, HIGH); // Move Motor A (The Coil holder)  
+                    // Motor A (The coil holder) /////////////////////////////////////////////////////   
+
+
+
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Start printing the progress bar here... ///////////////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+if (Steps%(MOTOR/100)==0)  // This is the percentage of the progress Bar.
+{
+    Bar = (Steps /(MOTOR/100));  // One percentage
+    lcd.setCursor(7,2);lcd.print(Bar+1); 
+
+if (Steps%(MOTOR/5)==0) // 10=10% each true statement / 5=20% each true statement
+{
+ 
+  if (BarChar>4) // 4 = 20 % each true stament / 9 = 10% each true statement.
+  {BarChar = 0;
+  lcd.setCursor(1,2);lcd.print("     "); /// We are clearing the bar after a full cycle (100%)
+  lcd.setCursor(7,2);lcd.print("   "); /// We are clearing the percentage print after a full cycle (100%)
+  }  
+  BarChar++;  
+  lcd.setCursor(BarChar,2);lcd.write(4); // We are printing every 10%
+
+  if (Steps%MOTOR==0) // After a full 360 degrees of the stepper, we just made a revolution, so we print another revolution here.
+  {     
+    // lcd.setCursor(13,0); lcd.print(Cycle);
+    // lcd.setCursor(7,1); lcd.print(GlobalCycle-1);
+    
+    LayerPC = (GlobalCycle / (GlobalSet/100));
+    lcd.setCursor(7,3); lcd.print(LayerPC);
+    lcd.setCursor(10,3); lcd.print("\4ET:00'00'");
+
+
+  }
+  
+  if (Cycle==0)
+  {
+    
+    // lcd.setCursor(7,1); lcd.print(Layers); // maybe change back
+  
+  }
+  
+
+}
+
+}
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Finished printing the progress bar here... ///////////////////////////////////////////////////////////////////////////////////////////  
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// CHANGING DIRECTION OF MOTORS  /////////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+                    // //////////////////////////////////////////////////////////////////////////////
+                    // Motor B (The wire holder) ////////////////////////////////////////////////////
+                    // //////////////////////////////////////////////////////////////////////////////
+                    if (Layers%2==0)
+                    
+                    { // Start of IF Layer%2
+                    
+                    
+                    if ( StepsB <= Coil )
+                        {  StepsB++ ;
+                        }
+                    if ( StepsB >= Coil )
+                        { StepsB = StepsB - Coil ;
+                           
+                        // ///////////////////////////////////////////////////////////////////////////////////////////
+                        // MOVING MOTOR B ON %2 STATE ////////////////////////////////////////////////////////////////
+                        // ///////////////////////////////////////////////////////////////////////////////////////////                           
+                          digitalWrite(DIR2_PIN, LOW); // Set the direction for Motor B (Wire holder)
+                          digitalWrite(STEP2_PIN, LOW); // Move Motor B (Wire holder)
+                          digitalWrite(STEP2_PIN, HIGH); // Move Motor B (Wire holder)
+                        // ///////////////////////////////////////////////////////////////////////////////////////////
+                        // MOVING MOTOR B ON %2 STATE /////////////////////////////////////////////////////////////////
+                        // /////////////////////////////////////////////////////////////////////////////////////////// 
+                        
+                        
+                        }
+                     
+                    } // End of IF Layer%2                   
+                    // //////////////////////////////////////////////////////////////////////////////
+                    // Motor B (The wire holder) ////////////////////////////////////////////////////
+                    // //////////////////////////////////////////////////////////////////////////////
+                    
+                    
+                    
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////// 
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////// 
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////// 
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////// 
+                    if (Layers%2!=0)
+
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////// 
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////// 
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////// 
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////// 
+
+
+                    // //////////////////////////////////////////////////////////////////////////////
+                    // Motor B (The wire holder) ////////////////////////////////////////////////////
+                    // //////////////////////////////////////////////////////////////////////////////
+
+
+                    { // Start of ELSE
+                      
+                      
+                    if ( StepsB <= Coil )
+                        {  StepsB++ ;
+                        }
+                    if ( StepsB >= Coil )
+                        { StepsB = StepsB - Coil ;                
+                     
+                        // ///////////////////////////////////////////////////////////////////////////////////////////
+                        // MOVING MOTOR B ////////////////////////////////////////////////////////////////////////////
+                        // ///////////////////////////////////////////////////////////////////////////////////////////                         
+                          digitalWrite(DIR2_PIN, HIGH); // Set the direction for Motor B (Wire holder)
+                          digitalWrite(STEP2_PIN, LOW); // Move Motor B (Wire holder)
+                          digitalWrite(STEP2_PIN, HIGH); // Move Motor B (Wire holder)
+                        // ///////////////////////////////////////////////////////////////////////////////////////////
+                        // MOVING MOTOR B ////////////////////////////////////////////////////////////////////////////
+                        // ///////////////////////////////////////////////////////////////////////////////////////////                         
+                        }
+                        
+                    } // END of ELSE
+                      
+                    // //////////////////////////////////////////////////////////////////////////////
+                    // Motor B (The wire holder) ////////////////////////////////////////////////////
+                    // //////////////////////////////////////////////////////////////////////////////
+                     
+                     
+
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// CHANGING DIRECTION OF MOTORS  ////////////////////////////////////////////////////////////////////////////////////////
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+
+                     
+                     
+
+delayMicroseconds(VOMvalue); // Delay for the motor (160 is the maximum speed for this motor)
+
+           } // Steps /////////////////////////////////////////////////////////////////////////////
+
+lcd.setCursor(7,0);lcd.print("   ");
+lcd.setCursor(7,0); lcd.print(Cycle+1);
+
+
+
+          } // Cycle /////////////////////////////////////////////////////////////////////////////
+
+
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////
+// ENDS 'FOR' CYCLE /////////////////////////////////////////////////////////////////////////////////////////
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+          
+          } // Layers /////////////////////////////////////////////////////////////////////////////
+
+
+// //////////////////////////////////////////////////////
+// Print Final values ///////////////////////////////////
+
+
+    lcd.setCursor(0,0); lcd.print("##");
+    lcd.setCursor(0,1); lcd.print("##"); lcd.setCursor(7,1); lcd.print(Layers);
+    // lcd.setCursor(7,1); lcd.print(GlobalCycle);
+    
+    
+//    delay(100000000);   
+    
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// 
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////      
+// PROGRAMM LOOP ENDS   ////////////////////////////////////////////////////////////////////////////////////////////////////////////////// 
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    
+
+
+// /////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////
+// PROGRAMM ENDS HERE //////////////////////////////////////////////////////////////////////////
+    break;
+// /////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+    break;  
+  
+  
+    default:
+    break;
+  
+    
+  }  // THIS BRACKET CLOSE THE PROGRAMM /////////////////////////////////////////
+  
+  break;
+
+ 
+
+    
+    
+  
+  
+  
+  
+
+} // Switch Menu ///////  
+  
+} // if key loop /////////
+  
+} // if key ! oldkey 2 /////////// 
+
+} // (key != oldkey) loop /////////////
+
+
+
+
+
+
+} // Void Loop /////////////////////
+
+
+
+
+
+
+
+
+
+// Convert ADC value to key number /////////////////////////////////
+int get_key(unsigned int input)
+{ // ger_key Loop ////////////////////////////
+int k;
+
+for (k = 0; k < NUM_KEYS; k++)
+{
+if (input < adc_key_val[k])
+{
+
+return k;
+}
+}
+
+if (k >= NUM_KEYS)
+k = -1; // No valid key pressed
+
+return k;
+} // ger_key Loop ////////////////////////////
+// ===================================================================
+// Lcd tools
+
+void clearLine(int line)
+{
+lcd.setCursor(0,line);
+lcd.print("		    ");
+lcd.setCursor(0,line);
+}
+// Convert ADC value to key number /////////////////////////////////
+  
+
+
